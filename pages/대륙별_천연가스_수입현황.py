@@ -100,9 +100,12 @@ import streamlit as st
 st.set_page_config(page_title="대륙별 천연가스 수입 현황", layout="wide")
 st.title("🌍 한국의 대륙별 천연가스 수입 현황 분석")
 
-FILE_PATH = Path(
-    r"D:\Project\한국가스공사월별시도별도시가스판매현황\data\한국가스공사_한국의 대륙별 천연가스 수입 현황_20240630.csv"
-)
+# ---- 상대경로로 수정 ----
+# (이 파일의 상위 폴더 → /data 디렉토리)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DATA_PATH = REPO_ROOT / "data" / "한국가스공사_한국의 대륙별 천연가스 수입 현황_20240630.csv"
+
+FILE_PATH = DATA_PATH
 
 # ======================
 # 데이터 로드 & 정규화

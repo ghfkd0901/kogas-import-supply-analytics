@@ -12,9 +12,12 @@ st.set_page_config(page_title="한국가스공사 월별 시도별 판매현황"
 st.title("한국가스공사 월별 · 시도별 도시가스 판매현황")
 st.caption("원본: 한국가스공사 월별 시도별 도시가스 판매현황 CSV")
 
-FILE_PATH = Path(
-    r"D:\Project\한국가스공사월별시도별도시가스판매현황\data\한국가스공사_한국가스공사_월별 시도별 도시가스 판매현황_20221231.csv"
-)
+# ---- 상대경로로 수정 ----
+# (현재 파일: pages/월별시도별_도시가스공급현황.py → 상위 폴더가 프로젝트 루트)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DATA_PATH = REPO_ROOT / "data" / "한국가스공사_한국가스공사_월별 시도별 도시가스 판매현황_20221231.csv"
+
+FILE_PATH = DATA_PATH
 
 # ======================
 # 데이터 로드 함수
