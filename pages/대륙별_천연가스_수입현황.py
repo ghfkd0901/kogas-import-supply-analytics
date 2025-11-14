@@ -35,18 +35,20 @@
 
 1. **1번 그래프 – 단위금액(단위가격) 꺾은선 그래프**
    - y: `단위가격(톤당달러)`  
-   - x: `연월일`  
+   - x: 집계 단위(연도별/월별)로 변환된 날짜  
    - 색: `수입지역`  
    - 단위가격이 `0`인 데이터는 그래프에서 제외
 
 2. **2번 그래프 – 총금액**
    - 단위: 사이드바에서 `백만달러 / 억달러` 선택
+   - 집계 단위: 사이드바에서 `연도별 / 월별` 선택
    - 타입:
      - 누적 영역그래프: 대륙별 금액 규모 추이
      - 100% 누적막대그래프: 시점별 **대륙 간 금액 비중 구조** 확인
 
 3. **3번 그래프 – 중량**
    - 단위: 사이드바에서 `톤 / 천톤` 선택
+   - 집계 단위: 사이드바에서 `연도별 / 월별` 선택
    - 타입:
      - 누적 영역그래프: 대륙별 수입 중량 규모 추이
      - 100% 누적막대그래프: 시점별 **대륙 간 중량 비중 구조** 확인
@@ -101,10 +103,8 @@ st.set_page_config(page_title="대륙별 천연가스 수입 현황", layout="wi
 st.title("🌍 한국의 대륙별 천연가스 수입 현황 분석")
 
 # ---- 상대경로로 수정 ----
-# (이 파일의 상위 폴더 → /data 디렉토리)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = REPO_ROOT / "data" / "한국가스공사_한국의 대륙별 천연가스 수입 현황_20240630.csv"
-
 FILE_PATH = DATA_PATH
 
 # ======================
@@ -123,7 +123,6 @@ def load_and_transform(path: Path) -> pd.DataFrame:
         df = df.rename(columns={"중량(톤)기타": "중량(톤)_기타"})
 
     # 2) 합계 열 완전히 제거
-    #    ex) 단위가격(톤당달러)_합계, 금액(백만달러)_합계, 중량(톤)_합계
     df = df.drop(columns=[c for c in df.columns if c.endswith("_합계")])
 
     # 3) 지표별 컬럼 리스트
@@ -190,6 +189,14 @@ df = load_and_transform(FILE_PATH)
 # ======================
 st.sidebar.header("⚙️ 필터")
 
+# 집계 단위: 연도별 / 월별 (기본값: 연도별)
+agg_level = st.sidebar.radio(
+    "집계 단위",
+    ["연도별", "월별"],
+    index=0,        # 기본 연도별
+    horizontal=True,
+)
+
 # 수입지역 선택
 regions = sorted(df["수입지역"].unique())
 selected_regions = st.sidebar.multiselect(
@@ -198,7 +205,7 @@ selected_regions = st.sidebar.multiselect(
     default=regions,
 )
 
-# --- 날짜 슬라이더 (date 타입으로 변환해서 사용) ---
+# 날짜 범위 슬라이더(원본 일자 기준)
 date_min_ts = df["연월일"].min()
 date_max_ts = df["연월일"].max()
 
@@ -206,7 +213,7 @@ date_min = date_min_ts.date()
 date_max = date_max_ts.date()
 
 date_range = st.sidebar.slider(
-    "기간 선택",
+    "기간 선택 (원자료 기준)",
     min_value=date_min,
     max_value=date_max,
     value=(date_min, date_max),
@@ -234,6 +241,9 @@ chart_type = st.sidebar.radio(
     ["누적 영역그래프", "100% 누적막대그래프(비율)"],
 )
 
+# 집계 단위에 따른 x축 라벨
+x_label = "연도" if agg_level == "연도별" else "연월"
+
 # ======================
 # 필터 적용
 # ======================
@@ -244,6 +254,14 @@ mask = (
 )
 df_filtered = df[mask].copy()
 
+# 집계용 날짜 컬럼 생성: 집계일
+if agg_level == "연도별":
+    # 연도 시작일(1월 1일)로 통일
+    df_filtered["집계일"] = df_filtered["연월일"].dt.to_period("Y").dt.to_timestamp()
+else:
+    # 월 시작일(1일)로 통일
+    df_filtered["집계일"] = df_filtered["연월일"].dt.to_period("M").dt.to_timestamp()
+
 # ======================
 # 단위 변환 함수들
 # ======================
@@ -253,8 +271,7 @@ def convert_amount(df_in: pd.DataFrame, unit: str):
         factor = 1
         y_label = "금액 (백만달러)"
     elif unit == "억달러":
-        # 1억달러 = 100백만달러 → 억달러 = 백만달러 / 100
-        factor = 1 / 100
+        factor = 1 / 100  # 1억달러 = 100백만달러
         y_label = "금액 (억달러)"
     else:
         factor = 1
@@ -284,71 +301,84 @@ df_amount, amount_y_label = convert_amount(df_filtered, amount_unit)
 df_weight, weight_y_label = convert_weight(df_filtered, weight_unit)
 
 # ======================
-# 1번 그래프: 단위금액 꺾은선 그래프 (단위가격 0 제외)
+# 1번 그래프: 단위금액 꺾은선 그래프 (단위가격 0 제외, 연/월 집계)
 # ======================
 st.subheader("1️⃣ 단위금액 추이 — 단위가격(톤당달러) 꺾은선 그래프")
 
-# 단위가격 0인 값은 그래프에서 제외
 df_line = df_filtered[df_filtered["단위가격(톤당달러)"] != 0].copy()
 
 if df_line.empty:
     st.warning("단위가격이 0이 아닌 데이터가 없습니다. 필터를 다시 선택해 주세요.")
 else:
+    # 집계 단위별 평균 단위가격
+    df_line_grouped = (
+        df_line
+        .groupby(["집계일", "수입지역"], as_index=False)["단위가격(톤당달러)"]
+        .mean()
+        .sort_values("집계일")
+    )
+
     fig1 = px.line(
-        df_line.sort_values("연월일"),
-        x="연월일",
+        df_line_grouped,
+        x="집계일",
         y="단위가격(톤당달러)",
         color="수입지역",
         markers=True,
-        title="대륙별 단위가격(톤당달러) 추이 (단위가격 0 제외)",
+        title=f"대륙별 단위가격(톤당달러) 추이 ({agg_level} 평균, 단위가격 0 제외)",
     )
     fig1.update_layout(
-        xaxis_title="연월일",
+        xaxis_title=x_label,
         yaxis_title="단위가격 (톤당달러)",
         hovermode="x unified",
     )
     st.plotly_chart(fig1, use_container_width=True)
 
 # ======================
-# 2번 그래프: 총금액 누적 영역 / 100% 누적막대
+# 2번 그래프: 총금액 누적 영역 / 100% 누적막대 (연/월 집계)
 # ======================
 st.subheader("2️⃣ 총금액 — 누적 영역그래프 / 100% 누적막대그래프")
 
 if df_amount.empty:
     st.warning("선택된 조건에 해당하는 데이터가 없습니다.")
 else:
+    # 집계 단위별 합계 금액
+    df_amt_grouped = (
+        df_amount
+        .groupby(["집계일", "수입지역"], as_index=False)["금액_변환"]
+        .sum()
+        .sort_values("집계일")
+    )
+
     if chart_type == "누적 영역그래프":
-        # ---- 누적 영역그래프 (금액) ----
-        df_plot_amt = df_amount.sort_values("연월일").copy()
         fig2 = px.area(
-            df_plot_amt,
-            x="연월일",
+            df_amt_grouped,
+            x="집계일",
             y="금액_변환",
             color="수입지역",
-            title=f"대륙별 {amount_y_label} 추이 (누적 영역)",
+            title=f"대륙별 {amount_y_label} 추이 ({agg_level}, 누적 영역)",
         )
         fig2.update_layout(
-            xaxis_title="연월일",
+            xaxis_title=x_label,
             yaxis_title=amount_y_label,
             hovermode="x unified",
         )
         st.plotly_chart(fig2, use_container_width=True)
 
     else:
-        # ---- 100% 누적막대그래프 (금액 비중) ----
-        df_pct_amt = df_amount.sort_values("연월일").copy()
-        total_by_date_amt = df_pct_amt.groupby("연월일")["금액_변환"].transform("sum")
+        # 100% 누적막대 (비중)
+        df_pct_amt = df_amt_grouped.copy()
+        total_by_date_amt = df_pct_amt.groupby("집계일")["금액_변환"].transform("sum")
         df_pct_amt["비중(%)"] = df_pct_amt["금액_변환"] / total_by_date_amt * 100
 
         fig2 = px.bar(
             df_pct_amt,
-            x="연월일",
+            x="집계일",
             y="비중(%)",
             color="수입지역",
-            title=f"대륙별 금액 비중 (100% 누적막대, 기준: {amount_unit})",
+            title=f"대륙별 금액 비중 (100% 누적막대, {agg_level}, 기준: {amount_unit})",
         )
         fig2.update_layout(
-            xaxis_title="연월일",
+            xaxis_title=x_label,
             yaxis_title="비중 (%)",
             barmode="stack",
             hovermode="x unified",
@@ -356,45 +386,51 @@ else:
         st.plotly_chart(fig2, use_container_width=True)
 
 # ======================
-# 3번 그래프: 중량 누적 영역 / 100% 누적막대
+# 3번 그래프: 중량 누적 영역 / 100% 누적막대 (연/월 집계)
 # ======================
 st.subheader("3️⃣ 중량 — 누적 영역그래프 / 100% 누적막대그래프")
 
 if df_weight.empty:
     st.warning("선택된 조건에 해당하는 데이터가 없습니다.")
 else:
+    # 집계 단위별 합계 중량
+    df_wgt_grouped = (
+        df_weight
+        .groupby(["집계일", "수입지역"], as_index=False)["중량_변환"]
+        .sum()
+        .sort_values("집계일")
+    )
+
     if chart_type == "누적 영역그래프":
-        # ---- 누적 영역그래프 (중량) ----
-        df_plot_wgt = df_weight.sort_values("연월일").copy()
         fig3 = px.area(
-            df_plot_wgt,
-            x="연월일",
+            df_wgt_grouped,
+            x="집계일",
             y="중량_변환",
             color="수입지역",
-            title=f"대륙별 {weight_y_label} 추이 (누적 영역)",
+            title=f"대륙별 {weight_y_label} 추이 ({agg_level}, 누적 영역)",
         )
         fig3.update_layout(
-            xaxis_title="연월일",
+            xaxis_title=x_label,
             yaxis_title=weight_y_label,
             hovermode="x unified",
         )
         st.plotly_chart(fig3, use_container_width=True)
 
     else:
-        # ---- 100% 누적막대그래프 (중량 비중) ----
-        df_pct_wgt = df_weight.sort_values("연월일").copy()
-        total_by_date_wgt = df_pct_wgt.groupby("연월일")["중량_변환"].transform("sum")
+        # 100% 누적막대 (비중)
+        df_pct_wgt = df_wgt_grouped.copy()
+        total_by_date_wgt = df_pct_wgt.groupby("집계일")["중량_변환"].transform("sum")
         df_pct_wgt["비중(%)"] = df_pct_wgt["중량_변환"] / total_by_date_wgt * 100
 
         fig3 = px.bar(
             df_pct_wgt,
-            x="연월일",
+            x="집계일",
             y="비중(%)",
             color="수입지역",
-            title=f"대륙별 중량 비중 (100% 누적막대, 기준: {weight_unit})",
+            title=f"대륙별 중량 비중 (100% 누적막대, {agg_level}, 기준: {weight_unit})",
         )
         fig3.update_layout(
-            xaxis_title="연월일",
+            xaxis_title=x_label,
             yaxis_title="비중 (%)",
             barmode="stack",
             hovermode="x unified",
@@ -402,10 +438,10 @@ else:
         st.plotly_chart(fig3, use_container_width=True)
 
 # ======================
-# 하단: 사람이 보기 좋게 포맷팅된 데이터 테이블
+# 하단: 사람이 보기 좋게 포맷팅된 데이터 테이블 (원본 일자 기준)
 # ======================
 st.divider()
-st.subheader("🔎 필터 적용된 데이터 (포맷팅)")
+st.subheader("🔎 필터 적용된 데이터 (포맷팅, 원자료 기준)")
 
 if df_filtered.empty:
     st.info("표시할 데이터가 없습니다.")
